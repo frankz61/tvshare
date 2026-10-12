@@ -194,6 +194,50 @@ def test_single_thread_transcode_works(authed: TestClient, tmp_path: Path):
     assert authed.get(f"/api/videos/{created['id']}").json()["status"] == "ready"
 
 
+def test_parse_out_time():
+    from app.media import parse_out_time
+
+    assert parse_out_time("out_time_us=2500000\n") == 2.5
+    assert parse_out_time("out_time_us=N/A") is None
+    assert parse_out_time("progress=continue") is None
+
+
+def test_processor_status(settings: Settings):
+    import time as _time
+
+    from app.db import Database
+    from app.media import Processor
+
+    settings.ensure_dirs()
+    p = Processor(settings, Database(settings.db_path))  # worker thread not started
+    p._pending = ["b", "c"]
+    p._current = {"id": "a", "stage": "transcoding", "done": 30.0, "total": 120.0, "started": _time.monotonic() - 60}
+    st = p.status("a")
+    assert st["stage"] == "transcoding" and st["percent"] == 25.0
+    assert 170 <= st["eta"] <= 190  # 30s of video took 60s -> 90s left takes ~180s
+    assert p.status("b") == {"stage": "queued", "ahead": 1}
+    assert p.status("c") == {"stage": "queued", "ahead": 2}
+    assert p.status("zzz") is None
+
+
+@needs_ffmpeg
+def test_transcode_reports_progress(settings: Settings, tmp_path: Path):
+    from app import media
+    from app.db import Database
+
+    settings.ensure_dirs()
+    db = Database(settings.db_path)
+    make_video(tmp_path / "p.mkv", ["-c:v", "mpeg4", "-c:a", "libopus"]).replace(media.source_path(settings, "vid12345"))
+    db.create_video("vid12345", "t", None, "p.mkv")
+    events: list[tuple[str, float, float]] = []
+    media.process_video(settings, db, "vid12345", lambda *e: events.append(e))
+    assert db.get_video("vid12345")["status"] == "ready"
+    transcoding = [e for e in events if e[0] == "transcoding"]
+    assert transcoding and all(1.5 < total < 2.5 for _, _, total in transcoding)
+    assert [d for _, d, _ in transcoding] == sorted(d for _, d, _ in transcoding)
+    assert events[-1][0] == "finishing"
+
+
 def test_tv_pairing(client: TestClient):
     start = client.post("/api/pair").json()
     assert len(start["code"]) == 6

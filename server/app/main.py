@@ -57,10 +57,13 @@ class PairConfirm(BaseModel):
 
 # ---------- helpers ----------
 
-def video_json(v: dict) -> dict:
+def video_json(v: dict, progress: dict | None = None) -> dict:
     vid = v["id"]
     ready = v["status"] == "ready"
     return {
+        # Only while processing: {"stage": "queued", "ahead": n} or
+        # {"stage": "transcoding"|"finishing", "percent", "eta", "elapsed"} (seconds).
+        "progress": progress,
         "id": vid,
         "title": v["title"],
         "category_id": v["category_id"],
@@ -117,6 +120,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.processor = processor
     app.state.token = family_token(settings.secret(), settings.password)
     limiter = LoginLimiter()
+
+    def to_json(v: dict) -> dict:
+        return video_json(v, processor.status(v["id"]) if v["status"] == "processing" else None)
+
     pairing = PairingStore()
     auth = [Depends(require_auth)]
 
@@ -192,14 +199,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/videos", dependencies=auth)
     def list_videos(category_id: int | None = None, uncategorized: bool = False):
-        return [video_json(v) for v in db.list_videos(category_id, uncategorized)]
+        return [to_json(v) for v in db.list_videos(category_id, uncategorized)]
 
     @app.get("/api/videos/{video_id}", dependencies=auth)
     def get_video(video_id: str):
         v = db.get_video(check_id(video_id))
         if v is None:
             raise HTTPException(status_code=404, detail="视频不存在")
-        return video_json(v)
+        return to_json(v)
 
     @app.patch("/api/videos/{video_id}", dependencies=auth)
     def update_video(video_id: str, body: VideoPatch):
@@ -216,7 +223,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 raise HTTPException(status_code=400, detail="分类不存在")
             fields["category_id"] = body.category_id
         db.update_video(video_id, **fields)
-        return video_json(db.get_video(video_id))  # type: ignore[arg-type]
+        return to_json(db.get_video(video_id))  # type: ignore[arg-type]
 
     @app.delete("/api/videos/{video_id}", dependencies=auth)
     def delete_video(video_id: str):
@@ -299,7 +306,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         db.create_video(video_id, up["title"], up["category_id"], up["filename"])
         db.delete_upload(upload_id)
         processor.submit(video_id)
-        return video_json(db.get_video(video_id))  # type: ignore[arg-type]
+        return to_json(db.get_video(video_id))  # type: ignore[arg-type]
 
     @app.delete("/api/uploads/{upload_id}", dependencies=auth)
     def upload_cancel(upload_id: str):

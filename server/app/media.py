@@ -9,7 +9,10 @@ import logging
 import queue
 import shutil
 import subprocess
+import tempfile
 import threading
+import time
+from collections.abc import Callable
 from pathlib import Path
 
 from .config import Settings
@@ -151,7 +154,38 @@ def thumb_path(settings: Settings, video_id: str) -> Path:
     return settings.thumbs_dir / f"{video_id}.jpg"
 
 
-def process_video(settings: Settings, db: Database, video_id: str) -> None:
+ProgressCallback = Callable[[str, float, float], None]  # (stage, seconds done, total seconds)
+
+
+def parse_out_time(line: str) -> float | None:
+    """Seconds encoded so far, from one line of ffmpeg's `-progress` output."""
+    key, _, value = line.strip().partition("=")
+    if key != "out_time_us":
+        return None
+    try:
+        return max(0.0, int(value) / 1_000_000)
+    except ValueError:  # "N/A" before the first frame
+        return None
+
+
+def run_ffmpeg(cmd: list[str], total: float, on_progress: ProgressCallback | None) -> tuple[int, str]:
+    """Runs ffmpeg niced, reporting progress from its `-progress` key=value lines (~2/s)."""
+    cmd = [cmd[0], "-progress", "pipe:1", "-nostats", *cmd[1:]]
+    with tempfile.TemporaryFile(mode="w+") as err:
+        proc = subprocess.Popen(low_priority(cmd), stdout=subprocess.PIPE, stderr=err, text=True)
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            done = parse_out_time(line)
+            if done is not None and on_progress:
+                on_progress("transcoding", min(done, total) if total else done, total)
+        proc.wait()
+        err.seek(0)
+        return proc.returncode, err.read()
+
+
+def process_video(
+    settings: Settings, db: Database, video_id: str, on_progress: ProgressCallback | None = None
+) -> None:
     src = source_path(settings, video_id)
     dst = output_path(settings, video_id)
     tmp = dst.with_suffix(".tmp.mp4")
@@ -159,11 +193,14 @@ def process_video(settings: Settings, db: Database, video_id: str) -> None:
         info = probe(settings, src)
         if not _streams(info, "video"):
             raise ValueError("文件里没有视频画面")
+        total = float(info.get("format", {}).get("duration") or 0)
         cmd = transcode_command(settings, src, tmp, info)
-        result = subprocess.run(low_priority(cmd), capture_output=True, text=True)
-        if result.returncode != 0:
-            raise RuntimeError(result.stderr.strip()[-500:] or "转码失败")
+        returncode, stderr = run_ffmpeg(cmd, total, on_progress)
+        if returncode != 0:
+            raise RuntimeError(stderr.strip()[-500:] or "转码失败")
         tmp.replace(dst)
+        if on_progress:
+            on_progress("finishing", total, total)
 
         out_info = probe(settings, dst)
         v = _streams(out_info, "video")[0]
@@ -189,13 +226,45 @@ def process_video(settings: Settings, db: Database, video_id: str) -> None:
 
 
 class Processor:
-    """Single background worker; transcoding is CPU-bound, so one at a time."""
+    """Single background worker; transcoding is CPU-bound, so one at a time.
+
+    Also keeps the queue order and the running job's progress in memory (never in
+    the database), so the phone page can show "queued" / "37%, about 1 min left".
+    """
 
     def __init__(self, settings: Settings, db: Database) -> None:
         self.settings = settings
         self.db = db
         self.queue: queue.Queue[str | None] = queue.Queue()
         self.thread = threading.Thread(target=self._run, name="tvshare-processor", daemon=True)
+        self._lock = threading.Lock()
+        self._pending: list[str] = []
+        self._current: dict | None = None
+
+    def status(self, video_id: str) -> dict | None:
+        """Progress for a video that is processing, or None if the worker doesn't know it."""
+        with self._lock:
+            cur = self._current
+            if cur and cur["id"] == video_id:
+                done, total = cur["done"], cur["total"]
+                percent = min(99.0, done / total * 100) if total else None
+                elapsed = time.monotonic() - cur["started"]
+                # Estimate only once there is something to extrapolate from.
+                eta = elapsed / done * (total - done) if total and done >= total * 0.02 else None
+                return {
+                    "stage": cur["stage"],
+                    "percent": round(percent, 1) if percent is not None else None,
+                    "eta": round(eta) if eta is not None else None,
+                    "elapsed": round(elapsed),
+                }
+            if video_id in self._pending:
+                return {"stage": "queued", "ahead": self._pending.index(video_id) + (1 if cur else 0)}
+        return None
+
+    def _report(self, stage: str, done: float, total: float) -> None:
+        with self._lock:
+            if self._current:
+                self._current.update(stage=stage, done=done, total=total)
 
     def start(self) -> None:
         if shutil.which(self.settings.ffmpeg) is None:
@@ -205,6 +274,8 @@ class Processor:
             self.submit(video_id)
 
     def submit(self, video_id: str) -> None:
+        with self._lock:
+            self._pending.append(video_id)
         self.queue.put(video_id)
 
     def stop(self) -> None:
@@ -219,6 +290,15 @@ class Processor:
             try:
                 if video_id is None:
                     return
-                process_video(self.settings, self.db, video_id)
+                with self._lock:
+                    if video_id in self._pending:
+                        self._pending.remove(video_id)
+                    self._current = {
+                        "id": video_id, "stage": "transcoding", "done": 0.0, "total": 0.0,
+                        "started": time.monotonic(),
+                    }
+                process_video(self.settings, self.db, video_id, self._report)
             finally:
+                with self._lock:
+                    self._current = None
                 self.queue.task_done()

@@ -9,7 +9,8 @@
       "env": {
         "TVSHARE_PASSWORD": "dance123",
         "TVSHARE_DATA_DIR": "./data-dev",
-        "TVSHARE_PORT": "18080"
+        "TVSHARE_PORT": "18080",
+        "TVSHARE_FFMPEG_THREADS": "1"
       },
       "port": 18080
     }

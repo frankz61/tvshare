@@ -278,3 +278,8 @@ main { padding: 0 16px 120px; }
   z-index: 30;
   max-width: calc(100% - 32px);
 }
+
+/* processing progress on a video card */
+.thumb .status { width: 100%; }
+.thumb .status .bar.mini { width: 78%; margin: 6px auto 4px; }
+.thumb .status .sub { font-size: 12px; opacity: 0.85; }

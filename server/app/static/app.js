@@ -83,6 +83,25 @@ function fmtDuration(sec) {
   return `${m}:${s}`;
 }
 
+function fmtEta(sec) {
+  if (sec < 60) return `${Math.max(5, Math.round(sec / 5) * 5)} 秒`;
+  return `${Math.round(sec / 60)} 分钟`;
+}
+
+// What to show for a video the server is still processing (progress lives in server memory).
+function processingInfo(v) {
+  const p = v.progress;
+  if (!p) return { label: "等待处理…", pct: null, sub: "" };
+  if (p.stage === "queued") return { label: "排队中", pct: null, sub: p.ahead > 0 ? `前面还有 ${p.ahead} 个` : "马上开始" };
+  if (p.stage === "finishing") return { label: "生成封面…", pct: 100, sub: "" };
+  const pct = p.percent;
+  return {
+    label: pct != null ? `转码中 ${Math.floor(pct)}%` : "转码中…",
+    pct,
+    sub: p.eta != null ? `约剩 ${fmtEta(p.eta)}` : "正在估算时间…",
+  };
+}
+
 function fmtSize(bytes) {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
@@ -187,7 +206,13 @@ function videoCard(v) {
       h("span", { class: "duration" }, fmtDuration(v.duration)),
     ];
   } else if (v.status === "processing") {
-    thumb = h("div", { class: "status" }, h("div", { class: "spinner" }), "处理中…");
+    const info = processingInfo(v);
+    thumb = h("div", { class: "status" },
+      info.pct == null ? h("div", { class: "spinner" }) : null,
+      h("div", {}, info.label),
+      info.pct != null ? h("div", { class: "bar mini" }, h("div", { style: `width:${info.pct}%` })) : null,
+      info.sub ? h("div", { class: "sub" }, info.sub) : null,
+    );
   } else {
     thumb = h("div", { class: "status failed" }, "⚠️ 处理失败");
   }
@@ -250,7 +275,9 @@ function openVideo(v) {
   if (v.status === "ready") {
     preview = h("video", { src: rel(v.video_url), controls: true, playsInline: true, preload: "metadata", poster: rel(v.thumb_url) });
   } else if (v.status === "processing") {
-    preview = h("p", { class: "muted" }, "视频正在处理（转成电视能播放的格式），稍等一下就好。");
+    const info = processingInfo(v);
+    preview = h("p", { class: "muted" },
+      `视频正在处理（转成电视能播放的格式）：${info.label}${info.sub ? "，" + info.sub : ""}。关掉这个窗口后，列表里会自动更新进度。`);
   } else {
     preview = h("div", {},
       h("p", { class: "error" }, "处理失败：" + (v.error || "未知原因")),
