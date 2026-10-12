@@ -36,10 +36,15 @@ class CategoryPatch(BaseModel):
     sort_order: int | None = None
 
 
+TITLE_MAX = 100
+
+
 class UploadInit(BaseModel):
-    filename: str = Field(min_length=1, max_length=255)
+    # Generous limits: titles default to the file name, and downloaded videos often
+    # have very long names. Over-long values are trimmed, not rejected.
+    filename: str = Field(min_length=1, max_length=1000)
     size: int = Field(gt=0)
-    title: str = Field(default="", max_length=100)
+    title: str = Field(default="", max_length=1000)
     category_id: int | None = None
 
 
@@ -91,7 +96,7 @@ def check_id(value: str) -> str:
 
 def default_title(filename: str) -> str:
     stem = Path(filename).stem.strip()
-    return stem[:100] or "未命名视频"
+    return stem[:TITLE_MAX] or "未命名视频"
 
 
 # ---------- app ----------
@@ -257,8 +262,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if body.category_id is not None and db.get_category(body.category_id) is None:
             raise HTTPException(status_code=400, detail="分类不存在")
         upload_id = secrets.token_urlsafe(16)
-        title = body.title.strip() or default_title(body.filename)
-        db.create_upload(upload_id, body.filename, body.size, title, body.category_id)
+        title = body.title.strip()[:TITLE_MAX] or default_title(body.filename)
+        db.create_upload(upload_id, body.filename[:255], body.size, title, body.category_id)
         upload_part(settings, upload_id).touch()
         return {"upload_id": upload_id, "chunk_size": settings.chunk_size, "received": 0}
 

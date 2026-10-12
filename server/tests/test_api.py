@@ -194,6 +194,19 @@ def test_single_thread_transcode_works(authed: TestClient, tmp_path: Path):
     assert authed.get(f"/api/videos/{created['id']}").json()["status"] == "ready"
 
 
+def test_long_names_are_trimmed_not_rejected(authed: TestClient):
+    # A real YouTube download name (110 chars, with an emoji) that used to get a 422.
+    name = "30 Minutes of Beautiful Relaxing Music 🌿 Soothing Piano Music & Nature Sounds for Reduce Stress [3YT5Otj-ZoE].mp4"
+    r = authed.post("/api/uploads", json={"filename": name, "size": 10, "title": name[:-4]})
+    assert r.status_code == 200, r.text
+    r = authed.post("/api/uploads", json={"filename": "x" * 400 + ".mp4", "size": 10})
+    assert r.status_code == 200, r.text
+    upload_id = r.json()["upload_id"]
+    authed.put(f"/api/uploads/{upload_id}?offset=0", content=b"0123456789")
+    v = authed.post(f"/api/uploads/{upload_id}/complete").json()
+    assert v["title"] == "x" * 100
+
+
 def test_parse_out_time():
     from app.media import parse_out_time
 

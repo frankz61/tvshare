@@ -61,7 +61,8 @@ async function api(method, path, body, opts = {}) {
   try { data = await res.json(); } catch { /* empty body */ }
   if (!res.ok) {
     if (res.status === 401 && path !== "/api/login") showLogin();
-    const msg = data && typeof data.detail === "string" ? data.detail : `请求失败（${res.status}）`;
+    let msg = data && typeof data.detail === "string" ? data.detail : `请求失败（${res.status}）`;
+    if (res.status === 422) msg = "提交的内容不符合要求（例如名称太长），请修改后再试";
     throw new ApiError(res.status, msg, data);
   }
   return data;
@@ -392,7 +393,8 @@ $("#file-input").addEventListener("change", (e) => {
 function openUploadForm(files) {
   const defaultCat = typeof state.filter === "number" ? state.filter : null;
   const category = h("select", {}, categoryOptions(defaultCat));
-  const titles = files.map((f) => h("input", { value: f.name.replace(/\.[^.]+$/, ""), maxLength: 100 }));
+  // Default title = file name. Setting .value bypasses maxLength, so trim here too (by characters, not UTF-16 units).
+  const titles = files.map((f) => h("input", { value: Array.from(f.name.replace(/\.[^.]+$/, "")).slice(0, 100).join(""), maxLength: 100 }));
   const start = () => {
     const categoryId = category.value === "" ? null : Number(category.value);
     files.forEach((file, i) => {
