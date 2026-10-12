@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#ff7a59">
+  <title>舞蹈视频库</title>
+  <link rel="stylesheet" href="static/style.css">
+</head>
+<body>
+  <!-- 登录 -->
+  <section id="login-view" class="login" hidden>
+    <div class="login-card">
+      <div class="logo">💃</div>
+      <h1>舞蹈视频库</h1>
+      <p class="muted">上传舞蹈视频，孩子在电视上就能跟着练</p>
+      <form id="login-form">
+        <input id="login-password" type="password" placeholder="家庭密码" autocomplete="current-password" required>
+        <button class="btn primary block" type="submit">进入</button>
+        <p id="login-error" class="error" hidden></p>
+      </form>
+    </div>
+  </section>
+
+  <!-- 主界面 -->
+  <section id="main-view" hidden>
+    <header class="topbar">
+      <h1>舞蹈视频库</h1>
+      <div class="topbar-actions">
+        <button class="btn ghost small" id="btn-pair" type="button">📺 绑定电视</button>
+        <button class="btn ghost small" id="btn-categories" type="button">分类</button>
+      </div>
+    </header>
+
+    <nav class="chips" id="chips"></nav>
+
+    <div id="upload-queue" class="upload-queue" hidden></div>
+
+    <main>
+      <div id="video-grid" class="grid"></div>
+      <div id="empty" class="empty" hidden>
+        <div class="empty-icon">🎬</div>
+        <p>这里还没有视频</p>
+        <p class="muted">点右下角的「上传视频」添加第一个吧</p>
+      </div>
+    </main>
+
+    <label class="fab" for="file-input">＋ 上传视频</label>
+    <input id="file-input" type="file" accept="video/*" multiple hidden>
+  </section>
+
+  <!-- 底部弹层 -->
+  <div id="sheet-backdrop" class="backdrop" hidden></div>
+  <div id="sheet" class="sheet" hidden role="dialog" aria-modal="true">
+    <div class="sheet-handle"></div>
+    <div id="sheet-body"></div>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+# Keep LF in the repo and in checkouts (shell scripts and Docker files run on Linux).
+* text=auto eol=lf
+*.bat text eol=crlf
+
+*.png binary
+*.webp binary
+*.jpg binary
+*.jar binary

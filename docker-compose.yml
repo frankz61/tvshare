@@ -1,0 +1,15 @@
+services:
+  tvshare:
+    build: ./server
+    restart: unless-stopped
+    ports:
+      # 放在 nginx 后面时设 TVSHARE_BIND=127.0.0.1，只让本机反向代理访问
+      - "${TVSHARE_BIND:-0.0.0.0}:8000:8000"
+    environment:
+      TVSHARE_PASSWORD: ${TVSHARE_PASSWORD:?请先在 .env 文件里设置 TVSHARE_PASSWORD}
+      # 服务器带宽小（例如 3~5Mbps）时改成 720，电视播放更流畅
+      TVSHARE_MAX_HEIGHT: ${TVSHARE_MAX_HEIGHT:-1080}
+      TVSHARE_SECURE_COOKIE: ${TVSHARE_SECURE_COOKIE:-0}
+      TVSHARE_TRUSTED_PROXIES: ${TVSHARE_TRUSTED_PROXIES:-127.0.0.1}
+    volumes:
+      - ./data:/data

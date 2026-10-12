@@ -1,0 +1,207 @@
+"""Turns whatever the phone uploaded into an MP4 every Android TV can play.
+
+Phones record HEVC/HDR, .mov, odd rotations and sometimes 4K. Cheap TV boxes
+handle H.264 8-bit 1080p reliably, so anything else is transcoded to that.
+"""
+
+import json
+import logging
+import queue
+import shutil
+import subprocess
+import threading
+from pathlib import Path
+
+from .config import Settings
+from .db import Database
+
+log = logging.getLogger("tvshare.media")
+
+HDR_TRANSFERS = {"smpte2084", "arib-std-b67"}
+
+
+def probe(settings: Settings, path: Path) -> dict:
+    out = subprocess.run(
+        [settings.ffprobe, "-v", "error", "-print_format", "json", "-show_streams", "-show_format", str(path)],
+        capture_output=True,
+        check=True,
+    )
+    return json.loads(out.stdout)
+
+
+def _streams(info: dict, kind: str) -> list[dict]:
+    return [s for s in info.get("streams", []) if s.get("codec_type") == kind]
+
+
+def _rotation(stream: dict) -> int:
+    for side in stream.get("side_data_list", []) or []:
+        if "rotation" in side:
+            return int(side["rotation"]) % 360
+    return int(stream.get("tags", {}).get("rotate", 0)) % 360
+
+
+def display_size(video: dict) -> tuple[int, int]:
+    w, h = int(video.get("width", 0)), int(video.get("height", 0))
+    if _rotation(video) in (90, 270):
+        w, h = h, w
+    return w, h
+
+
+def can_remux(settings: Settings, info: dict) -> bool:
+    """True when the source is already TV-friendly and only needs faststart."""
+    videos = _streams(info, "video")
+    if not videos:
+        return False
+    v = videos[0]
+    w, h = display_size(v)
+    audio_ok = all(a.get("codec_name") == "aac" for a in _streams(info, "audio")[:1])
+    container_ok = "mp4" in info.get("format", {}).get("format_name", "")
+    return (
+        v.get("codec_name") == "h264"
+        and v.get("pix_fmt") == "yuv420p"
+        and min(w, h) <= settings.max_height
+        and audio_ok
+        and container_ok
+    )
+
+
+_zscale_available: bool | None = None
+
+
+def has_zscale(settings: Settings) -> bool:
+    global _zscale_available
+    if _zscale_available is None:
+        try:
+            out = subprocess.run([settings.ffmpeg, "-hide_banner", "-filters"], capture_output=True, text=True)
+            _zscale_available = " zscale " in out.stdout
+        except OSError:
+            _zscale_available = False
+    return _zscale_available
+
+
+def transcode_command(settings: Settings, src: Path, dst: Path, info: dict) -> list[str]:
+    if can_remux(settings, info):
+        return [
+            settings.ffmpeg, "-y", "-v", "error", "-i", str(src),
+            "-map", "0:v:0", "-map", "0:a:0?", "-c", "copy",
+            "-movflags", "+faststart", str(dst),
+        ]
+
+    limit = settings.max_height
+    # Cap the shorter edge so portrait videos keep their full resolution too.
+    filters = [
+        f"scale='if(gt(iw,ih),-2,min({limit},iw))':'if(gt(iw,ih),min({limit},ih),-2)'"
+    ]
+    v = _streams(info, "video")[0]
+    if v.get("color_transfer") in HDR_TRANSFERS and has_zscale(settings):
+        # iPhone HDR footage looks washed out on SDR TVs without tone mapping.
+        filters.insert(0, (
+            "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,"
+            "tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv"
+        ))
+    filters.append("format=yuv420p")
+    return [
+        settings.ffmpeg, "-y", "-v", "error", "-i", str(src),
+        "-map", "0:v:0", "-map", "0:a:0?",
+        "-vf", ",".join(filters),
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-profile:v", "high",
+        "-c:a", "aac", "-b:a", "128k", "-ac", "2",
+        "-movflags", "+faststart", str(dst),
+    ]
+
+
+def make_thumbnail(settings: Settings, video: Path, thumb: Path, duration: float) -> None:
+    at = max(0.0, min(duration * 0.2, 15.0)) if duration else 0.0
+    subprocess.run(
+        [
+            settings.ffmpeg, "-y", "-v", "error", "-ss", f"{at:.2f}", "-i", str(video),
+            "-frames:v", "1", "-vf", "scale=640:-2", "-q:v", "4", str(thumb),
+        ],
+        capture_output=True,
+        check=True,
+    )
+
+
+def source_path(settings: Settings, video_id: str) -> Path:
+    return settings.videos_dir / f"{video_id}.src"
+
+
+def output_path(settings: Settings, video_id: str) -> Path:
+    return settings.videos_dir / f"{video_id}.mp4"
+
+
+def thumb_path(settings: Settings, video_id: str) -> Path:
+    return settings.thumbs_dir / f"{video_id}.jpg"
+
+
+def process_video(settings: Settings, db: Database, video_id: str) -> None:
+    src = source_path(settings, video_id)
+    dst = output_path(settings, video_id)
+    tmp = dst.with_suffix(".tmp.mp4")
+    try:
+        info = probe(settings, src)
+        if not _streams(info, "video"):
+            raise ValueError("文件里没有视频画面")
+        cmd = transcode_command(settings, src, tmp, info)
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip()[-500:] or "转码失败")
+        tmp.replace(dst)
+
+        out_info = probe(settings, dst)
+        v = _streams(out_info, "video")[0]
+        w, h = display_size(v)
+        duration = float(out_info.get("format", {}).get("duration") or 0)
+        make_thumbnail(settings, dst, thumb_path(settings, video_id), duration)
+
+        if db.get_video(video_id) is None:
+            # Deleted while we were working on it.
+            dst.unlink(missing_ok=True)
+            thumb_path(settings, video_id).unlink(missing_ok=True)
+        else:
+            db.update_video(
+                video_id, status="ready", duration=duration, width=w, height=h,
+                size=dst.stat().st_size, error=None,
+            )
+        src.unlink(missing_ok=True)
+    except Exception as exc:  # noqa: BLE001 - record any failure on the video
+        log.exception("processing %s failed", video_id)
+        tmp.unlink(missing_ok=True)
+        if db.get_video(video_id) is not None:
+            db.update_video(video_id, status="failed", error=str(exc)[:500])
+
+
+class Processor:
+    """Single background worker; transcoding is CPU-bound, so one at a time."""
+
+    def __init__(self, settings: Settings, db: Database) -> None:
+        self.settings = settings
+        self.db = db
+        self.queue: queue.Queue[str | None] = queue.Queue()
+        self.thread = threading.Thread(target=self._run, name="tvshare-processor", daemon=True)
+
+    def start(self) -> None:
+        if shutil.which(self.settings.ffmpeg) is None:
+            log.warning("ffmpeg not found (%s); uploads will fail to process", self.settings.ffmpeg)
+        self.thread.start()
+        for video_id in self.db.videos_with_status("processing"):
+            self.submit(video_id)
+
+    def submit(self, video_id: str) -> None:
+        self.queue.put(video_id)
+
+    def stop(self) -> None:
+        self.queue.put(None)
+
+    def wait_idle(self) -> None:
+        self.queue.join()
+
+    def _run(self) -> None:
+        while True:
+            video_id = self.queue.get()
+            try:
+                if video_id is None:
+                    return
+                process_video(self.settings, self.db, video_id)
+            finally:
+                self.queue.task_done()

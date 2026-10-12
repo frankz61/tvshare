@@ -1,0 +1,38 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+  html { zoom: 2; } html, body { margin: 0; width: 640px; height: 360px; overflow: hidden; background: #0a0135; }
+  .banner {
+    position: relative; width: 640px; height: 360px; overflow: hidden;
+    background:
+      radial-gradient(circle at 78% 30%, rgba(170, 60, 255, .35), transparent 55%),
+      radial-gradient(circle at 70% 95%, rgba(40, 150, 255, .25), transparent 50%),
+      linear-gradient(180deg, #1a0450 0%, #0a0135 60%, #07012a 100%);
+  }
+  .art {
+    position: absolute; left: -24px; top: -10px; width: 390px; height: 390px;
+    background: url("icon-source.webp") center / cover;
+    /* fade the square artwork into the banner background */
+    -webkit-mask-image: radial-gradient(closest-side at 50% 50%, #000 72%, transparent 100%);
+            mask-image: radial-gradient(closest-side at 50% 50%, #000 72%, transparent 100%);
+  }
+  .text { position: absolute; left: 352px; top: 0; bottom: 0; display: flex; flex-direction: column; justify-content: center; }
+  h1 {
+    margin: 0; color: #fff; letter-spacing: 3px;
+    font: 900 62px/1.1 "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    text-shadow: 0 0 6px #ff4fd8, 0 0 18px #c43bff, 0 0 36px #7a2bff, 0 0 2px #fff;
+  }
+  p {
+    margin: 14px 0 0 3px; color: #8fe9ff; letter-spacing: 5px;
+    font: 500 24px/1 "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    text-shadow: 0 0 10px rgba(60, 200, 255, .8);
+  }
+  .line { margin: 16px 0 0 3px; width: 200px; height: 3px; border-radius: 2px;
+          background: linear-gradient(90deg, #ff4fd8, #3cc8ff); box-shadow: 0 0 10px #c43bff; }
+</style></head>
+<body>
+  <div class="banner">
+    <div class="art"></div>
+    <div class="text"><h1>舞蹈练习</h1><div class="line"></div><p>跟着视频一起跳</p></div>
+  </div>
+</body></html>

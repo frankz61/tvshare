@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.TVShare" parent="android:Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowBackground">@color/background</item>
+        <item name="android:windowFullscreen">true</item>
+    </style>
+    <color name="background">#FF1B1613</color>
+    <!-- Matches the dark edges of the launcher artwork -->
+    <color name="ic_launcher_background">#FF0A0135</color>
+</resources>

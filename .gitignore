@@ -1,0 +1,15 @@
+.env
+# 打好的 APK 里带着服务器的隐藏路径
+dist/
+data/
+server/data*/
+__pycache__/
+.pytest_cache/
+
+tv/.gradle/
+tv/.kotlin/
+tv/build/
+tv/app/build/
+tv/local.properties
+*.iml
+.idea/

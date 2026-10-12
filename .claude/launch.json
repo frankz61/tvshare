@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "tvshare-server",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "app.main"],
+      "cwd": "server",
+      "env": {
+        "TVSHARE_PASSWORD": "dance123",
+        "TVSHARE_DATA_DIR": "./data-dev",
+        "TVSHARE_PORT": "18080"
+      },
+      "port": 18080
+    }
+  ]
+}
