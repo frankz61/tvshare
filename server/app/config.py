@@ -12,6 +12,8 @@ class Settings:
         self.chunk_size = int(os.environ.get("TVSHARE_CHUNK_SIZE", str(8 * 1024 * 1024)))
         # Longest edge of transcoded output; videos larger than this are downscaled.
         self.max_height = int(os.environ.get("TVSHARE_MAX_HEIGHT", "1080"))
+        # Threads per ffmpeg stage; 0 lets ffmpeg decide. 1 keeps a small server responsive.
+        self.ffmpeg_threads = int(os.environ.get("TVSHARE_FFMPEG_THREADS", "0"))
         self.ffmpeg = os.environ.get("TVSHARE_FFMPEG", "ffmpeg")
         self.ffprobe = os.environ.get("TVSHARE_FFPROBE", "ffprobe")
         # Set to "1" when the site is served over HTTPS so the auth cookie is marked Secure.

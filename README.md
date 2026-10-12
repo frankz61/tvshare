@@ -176,6 +176,8 @@ python -m pytest                              # 运行测试
 | `TVSHARE_DATA_DIR` | `./data` | 数据目录 |
 | `TVSHARE_PORT` | `8000` | 端口 |
 | `TVSHARE_MAX_HEIGHT` | `1080` | 转码后画面短边上限 |
+| `TVSHARE_FFMPEG_THREADS` | `0`（自动） | ffmpeg 每个环节用几个线程；小服务器建议 `1` |
+| `TVSHARE_CPUS` | `0`（不限制） | 容器最多用几个 CPU 核（docker compose 生效）；小服务器建议 `1`，转码时不会把整台机器拖死 |
 | `TVSHARE_SECURE_COOKIE` | `0` | 走 HTTPS 时设为 `1` |
 | `TVSHARE_TRUSTED_PROXIES` | `127.0.0.1` | 可信反向代理 IP |
 

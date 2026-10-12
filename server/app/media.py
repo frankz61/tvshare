@@ -79,6 +79,22 @@ def has_zscale(settings: Settings) -> bool:
     return _zscale_available
 
 
+def _input_threads(settings: Settings) -> list[str]:
+    n = settings.ffmpeg_threads
+    return ["-threads", str(n)] if n > 0 else []
+
+
+def _output_threads(settings: Settings) -> list[str]:
+    n = settings.ffmpeg_threads
+    return ["-threads", str(n), "-filter_threads", str(n)] if n > 0 else []
+
+
+def low_priority(cmd: list[str]) -> list[str]:
+    """Run ffmpeg niced so other services on the box get the CPU first."""
+    nice = shutil.which("nice")
+    return [nice, "-n", "10", *cmd] if nice else cmd
+
+
 def transcode_command(settings: Settings, src: Path, dst: Path, info: dict) -> list[str]:
     if can_remux(settings, info):
         return [
@@ -101,7 +117,8 @@ def transcode_command(settings: Settings, src: Path, dst: Path, info: dict) -> l
         ))
     filters.append("format=yuv420p")
     return [
-        settings.ffmpeg, "-y", "-v", "error", "-i", str(src),
+        settings.ffmpeg, "-y", "-v", "error", *_input_threads(settings), "-i", str(src),
+        *_output_threads(settings),
         "-map", "0:v:0", "-map", "0:a:0?",
         "-vf", ",".join(filters),
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-profile:v", "high",
@@ -113,10 +130,10 @@ def transcode_command(settings: Settings, src: Path, dst: Path, info: dict) -> l
 def make_thumbnail(settings: Settings, video: Path, thumb: Path, duration: float) -> None:
     at = max(0.0, min(duration * 0.2, 15.0)) if duration else 0.0
     subprocess.run(
-        [
-            settings.ffmpeg, "-y", "-v", "error", "-ss", f"{at:.2f}", "-i", str(video),
-            "-frames:v", "1", "-vf", "scale=640:-2", "-q:v", "4", str(thumb),
-        ],
+        low_priority([
+            settings.ffmpeg, "-y", "-v", "error", *_input_threads(settings), "-ss", f"{at:.2f}", "-i", str(video),
+            *_output_threads(settings), "-frames:v", "1", "-vf", "scale=640:-2", "-q:v", "4", str(thumb),
+        ]),
         capture_output=True,
         check=True,
     )
@@ -143,7 +160,7 @@ def process_video(settings: Settings, db: Database, video_id: str) -> None:
         if not _streams(info, "video"):
             raise ValueError("文件里没有视频画面")
         cmd = transcode_command(settings, src, tmp, info)
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(low_priority(cmd), capture_output=True, text=True)
         if result.returncode != 0:
             raise RuntimeError(result.stderr.strip()[-500:] or "转码失败")
         tmp.replace(dst)

@@ -168,6 +168,32 @@ def test_bad_file_fails_and_video_edit_delete(authed: TestClient, settings: Sett
     assert not (settings.videos_dir / f"{v['id']}.src").exists()
 
 
+def test_ffmpeg_thread_limit(settings: Settings, tmp_path: Path):
+    from app import media
+
+    info = {
+        "format": {"format_name": "matroska"},
+        "streams": [{"codec_type": "video", "codec_name": "hevc", "width": 1920, "height": 1080}],
+    }
+    assert "-threads" not in media.transcode_command(settings, tmp_path / "a", tmp_path / "b", info)
+
+    settings.ffmpeg_threads = 1
+    cmd = media.transcode_command(settings, tmp_path / "a", tmp_path / "b", info)
+    i = cmd.index("-i")
+    # Limits both the decoder (before -i) and the encoder/filters (after -i).
+    assert cmd[i - 2:i] == ["-threads", "1"]
+    assert cmd[i + 2:i + 6] == ["-threads", "1", "-filter_threads", "1"]
+
+
+@needs_ffmpeg
+def test_single_thread_transcode_works(authed: TestClient, tmp_path: Path):
+    authed.app.state.settings.ffmpeg_threads = 1
+    src = make_video(tmp_path / "one.mkv", ["-c:v", "mpeg4", "-c:a", "libopus"])
+    created = upload(authed, src, 64 * 1024)
+    authed.app.state.processor.wait_idle()
+    assert authed.get(f"/api/videos/{created['id']}").json()["status"] == "ready"
+
+
 def test_tv_pairing(client: TestClient):
     start = client.post("/api/pair").json()
     assert len(start["code"]) == 6
